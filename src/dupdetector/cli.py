@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 from typing import Optional, Iterable, Set, Any
 import json
+import concurrent.futures
 
 from dupdetector.lib.hashing import md5_file, phash_stub
 from dupdetector.services.repository import Repository
@@ -96,8 +97,10 @@ def scan(args, session: Optional[object] = None):
     if session is not None:
         repo = Repository(session)
 
+    # Build candidate list first so we can report total and progress (memory: holds Path objects)
+    candidates = []
     for p in sorted(_iter_files(folder, recursive)):
-        # extension filter
+        # extension filter (strict: if exts provided we only consider those)
         if exts is not None and p.suffix.lower() not in exts:
             continue
         try:
@@ -109,30 +112,84 @@ def scan(args, session: Optional[object] = None):
             continue
         if max_size is not None and size > int(max_size):
             continue
+        candidates.append((p, size))
 
+    total = len(candidates)
+    print(f"Found {total} candidate files to process")
+
+    # Worker pool size (tests may not set this arg)
+    workers = getattr(args, "workers", None) or 4
+
+    def _hash_worker(item):
+        p, size = item
+        path_str = str(p)
         try:
-            md5 = md5_file(str(p))
+            md5 = md5_file(path_str)
         except Exception as exc:
-            print(f"skipping {p}: {exc}")
-            continue
-        ph = phash_stub(str(p))
-        print(f"found file: {p} size={size} md5={md5} phash={ph}")
-        if repo:
-            repo.create_file(
-                path=str(p.resolve()),
-                original_path=str(p.resolve()),
-                name=p.name,
-                original_name=p.name,
-                size=size,
-                md5_hash=md5,
-                photo_hash=ph,
-            )
+            return {"path": path_str, "size": size, "md5": None, "phash": None, "error": str(exc)}
+        try:
+            ph = phash_stub(path_str)
+        except Exception:
+            ph = None
+        return {"path": path_str, "size": size, "md5": md5, "phash": ph, "error": None}
+
+    # Submit hashing work to workers; collect results and write to DB in main thread
+    results = []
+    if total > 0:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            future_to_item = {ex.submit(_hash_worker, item): item for item in candidates}
+            for i, fut in enumerate(concurrent.futures.as_completed(future_to_item), start=1):
+                res = fut.result()
+                results.append(res)
+                path = res.get("path")
+                size = res.get("size")
+                md5 = res.get("md5")
+                ph = res.get("phash")
+                err = res.get("error")
+                if err:
+                    print(f"{i} / {total}: skipping {path}: {err}")
+                    continue
+                print(f"{i} / {total}: found file: {path} size={size} md5={md5} phash={ph}")
+                if repo:
+                    try:
+                        repo.create_file(
+                            path=str(Path(path).resolve()),
+                            original_path=str(Path(path).resolve()),
+                            name=Path(path).name,
+                            original_name=Path(path).name,
+                            size=size,
+                            md5_hash=md5,
+                            photo_hash=ph,
+                        )
+                    except Exception as exc:
+                        print(f"error persisting {path}: {exc}")
 
     return 0
 
 
 def duplicates(args):
-    print("Listing duplicates (none in scaffold)")
+    # Provide a simple duplicates/near-duplicates listing that uses the
+    # Repository clustering helper. If run inside tests, a Session may be
+    # injected via `args.session` for deterministic behavior. Otherwise this
+    # command is a no-op in the scaffold.
+    session = getattr(args, "session", None)
+    if session is None:
+        print("No database session provided; cannot list duplicates in scaffold")
+        return 0
+
+    repo = Repository(session)
+    threshold = getattr(args, "threshold", 5)
+    clusters = repo.cluster_similar_photos(threshold=threshold)
+    if not clusters:
+        print("No clusters found")
+        return 0
+
+    for i, cluster in enumerate(clusters, start=1):
+        print(f"Cluster {i} (size={len(cluster)}):")
+        for fid in cluster:
+            f = repo.get_file_by_id(fid)
+            if f:
+                print(f"  - {f.path} (id={f.id})")
     return 0
 
 

@@ -31,6 +31,10 @@ Or specify a custom config path:
 python -m dupdetector.cli scan C:\path\to\media --config C:\path\to\config.json
 ```
 
+```powershell
+python .\scripts\run_scan_persist.py 'Z:\MacMini' --recursive --db 'sqlite:///Z:/tools/duplicate-detector/dupdetector.db'
+```
+
 ## Development
 
 Run tests with:
