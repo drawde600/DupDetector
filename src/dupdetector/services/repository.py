@@ -73,3 +73,35 @@ class Repository:
 
     def list_tags(self) -> list[Tag]:
         return self.session.query(Tag).order_by(Tag.name).all()
+
+    # Near-duplicate helpers (photo_hash)
+    def find_similar_by_phash(self, phash: str, max_distance: int = 5) -> list[File]:
+        """Return files whose photo_hash Hamming distance to `phash` is <= max_distance.
+
+        This implementation fetches candidates with non-null photo_hash and computes
+        Hamming distances in Python (sufficient for small datasets / tests).
+        """
+        from dupdetector.lib.hashing import hamming_distance
+
+        candidates = self.session.query(File).filter(File.photo_hash.isnot(None)).all()
+        similar = []
+        for c in candidates:
+            try:
+                dist = hamming_distance(phash, c.photo_hash)
+            except Exception:
+                continue
+            if dist <= max_distance:
+                similar.append(c)
+        return similar
+
+    def cluster_similar_photos(self, threshold: int = 5) -> list[list[int]]:
+        """Cluster files by photo_hash using a Hamming distance threshold.
+
+        Returns list of clusters containing file IDs.
+        """
+        from dupdetector.lib.hashing import cluster_by_hamming
+
+        rows = self.session.query(File.id, File.photo_hash).filter(File.photo_hash.isnot(None)).all()
+        # rows are tuples (id, phash)
+        clusters = cluster_by_hamming(rows, threshold)
+        return clusters
