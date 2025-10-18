@@ -31,11 +31,7 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-1.  **Simplicity and Ease of Use**: Is the feature simple to use and understand?
-2.  **Manual Testing**: Has the feature been manually tested?
-3.  **Rapid Feature Development**: Was the feature developed quickly and efficiently?
-4.  **Extensibility and Portability**: Is the feature extensible and portable?
-5.  **Governance**: Does the feature comply with the project constitution?
+[Gates determined based on constitution file]
 
 ## Project Structure
 
