@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Text
+from sqlalchemy import Column, Integer, String
 from dupdetector.models import Base
 
 
@@ -6,4 +6,4 @@ class Tag(Base):
     __tablename__ = "tags"
 
     id = Column(Integer, primary_key=True)
-    name = Column(Text, unique=True, nullable=False)
+    name = Column(String(255), unique=True, nullable=False)

@@ -16,6 +16,7 @@
 - Q: What features are explicitly out of scope for this version of the application? → A: Real-time file system monitoring, cloud storage integration, and advanced image editing capabilities are out of scope.
 - Q: How should the application handle database entries for physically deleted files? → A: Add a `is_deleted` flag to the `File` table to mark entries as deleted.
 - Q: Should the `File` table have separate columns for each metadata attribute, or should all additional metadata be stored in a single `metadata` column (e.g., as a JSON object)? → A: Use separate columns for each metadata attribute.
+- Q: Which testing policy should we follow? → A: Automated-tests-required (tests may be authored in the same PR).
 
 ## User Scenarios & Testing *(mandatory)*
 
