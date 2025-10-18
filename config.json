@@ -1,0 +1,11 @@
+{
+  "database": "mysql+pymysql://user:password@localhost:3306/dupdetector",
+  "media_folders": [
+    "Z:\\MacMini\\20251007"
+  ],
+  "workers": 16,
+  "recursive": true,
+  "extensions": ["jpg", "jpeg", "png", "bmp", "dng", "cr2", "cr3", "gif", "heic", "mp4", "mov", "mkv", "mpg", "mpeg", "avi"],
+  "min_size": 0,
+  "max_size": 104857600
+}
