@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dupdetector"
+version = "0.0.0"
+description = "Media Organizer CLI - scaffold"
+requires-python = ">=3.11"
+authors = [ { name = "maintainer" } ]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
