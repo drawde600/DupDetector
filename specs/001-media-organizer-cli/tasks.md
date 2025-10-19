@@ -1,171 +1,135 @@
 # Tasks: Media Organizer CLI
 
 **Input**: Design documents from `/specs/001-media-organizer-cli/`
-**Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
-
-```markdown
-# Tasks: Media Organizer CLI
-
-**Input**: Design documents from `/specs/001-media-organizer-cli/`
-**Generated**: by `/specify.task` on 2025-10-18
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Initialize repository layout and documentation (`.`)
-- [ ] T002 Initialize Python project and lock dependencies (`pyproject.toml` / `requirements.txt`)
-- [ ] T003 [P] Create `examples/config.json` and document configuration keys (`examples/config.json`)
-- [ ] T004 [P] Configure linting and formatting (ruff/black/isort) and add workflow (`.github/workflows/lint.yml`)
+- [ ] T001 Initialize Python project and dependencies (`pyproject.toml` / `requirements.txt`)
+- [ ] T002 [P] Create `config.json` and document configuration keys (`config.json`)
+- [ ] T003 [P] Configure linting and formatting (ruff/black/isort) and add workflow (`.github/workflows/lint.yml`)
 
 ---
 
 ## Phase 2: Foundational (Blocking Prerequisites)
 
-- [ ] T005 Setup initial DB schema and migrations (Alembic) for `src/models` and create `migrations/` (`src/models/, migrations/`)
-- [ ] T006 [P] Implement database abstraction layer and connection helpers (`src/lib/database.py`)
-- [ ] T007 [P] Implement ExifTool wrapper and path validation (`src/lib/exiftool.py`)
-- [ ] T008 Implement logging and structured log file output (`src/lib/logger.py`)
-- [ ] T009 Implement configuration management and validation (schema + config loader) (`src/lib/config.py`)
+- [ ] T004 Setup initial DB schema and migrations (Alembic) for `src/models` (`src/models`, `alembic/`)
+- [ ] T005 [P] Implement database abstraction layer and connection helpers (`src/lib/database.py`)
+- [ ] T006 [P] Implement ExifTool wrapper and path validation (`src/lib/exiftool.py`)
+- [ ] T007 Implement logging and structured log file output (`src/lib/logger.py`)
+- [ ] T008 Implement configuration management and validation (`src/lib/config.py`)
+- [ ] T008a [P] Document all config keys in README and validate schema (`src/lib/config.py`, `README.md`)
 
 ---
 
-## Phase 3: User Story 1 - Duplicate Detection (Priority: P1)
+## Phase 3: MVP - Initial Scan
 
-**Goal**: Scan media folders and identify duplicate files.
+**Goal**: Scan media folders, extract metadata, and populate the database.
 
-**Independent Test Criteria**: A sample dataset with known duplicates (in `tests/fixtures/duplicates/`) when scanned will populate the DB and the `duplicates` command will report the expected duplicate groups.
+**Independent Test Criteria**: A sample dataset with various media files, when scanned, will populate the database with correct metadata (hashes, EXIF, etc.).
 
 ### Test
 
-- [ ] T010 [US1] Create integration test fixture and test harness for duplicate detection (`tests/integration/test_duplicate_detection.py`)
+- [ ] T009a [MVP] Create synthetic test fixture dataset (10 images, 2 duplicates, EXIF variety) (`tests/fixtures/media_samples/`)
+- [ ] T009b [MVP] Create integration test for initial scan using fixture dataset (`tests/integration/test_scan.py`)
 
 ### Implementation
 
-- [ ] T011 [US1] Implement `scan` CLI command and folder walker (`src/cli/scan.py`)
-- [ ] T012 [P] [US1] Implement MD5 hashing utility and unit tests (`src/lib/hashing.py`, `tests/unit/test_hashing.py`)
-- [ ] T013 [P] [US1] Implement image hashing (phash) utility with configurable threshold (`src/lib/imagehashing.py`, `tests/unit/test_imagehashing.py`)
-- [ ] T014 [US1] Implement duplicate detection service and DB population (`src/services/duplicate_detector.py`)
-- [ ] T015 [US1] Implement `duplicates` CLI command and `--move-to` option wired to service (`src/cli/duplicates.py`)
-
-### Post-conditions / data
-
-- [ ] T016 [US1] Persist `md5_hash`, `photo_hash`, `is_duplicate`, and `duplicate_of_id` when duplicates are detected (`src/models/file.py`, migration)
-
----
-
-## Phase 4: User Story 2 - File Reorganization (Priority: P2)
-
-**Goal**: Reorganize media files into a new folder structure by date, location, or tags.
-
-**Independent Test Criteria**: Given `tests/fixtures/reorganize/` input, running `reorganize` with `--by-date` or `--by-tag` moves files to the expected folder layout under a temporary `out/` directory.
-
-### Test
-
-- [ ] T017 [US2] Add integration test for `reorganize --by-date` and `--by-tag` (`tests/integration/test_reorganize.py`)
-
-### Implementation
-
-- [ ] T018 [US2] Implement `reorganize` CLI command with `--by-date`, `--by-location`, `--by-tag`, and `--rename` flags (`src/cli/reorganize.py`)
-- [ ] T019 [P] [US2] Implement reorganization by date (year/month/day and configurable depth) (`src/services/reorganizer.py`)
-- [ ] T020 [P] [US2] Implement reorganization by location (GPS -> place resolution stub) (`src/services/reorganizer.py`)
-- [ ] T021 [P] [US2] Implement reorganization by tag (`src/services/reorganizer.py`)
-- [ ] T022 [US2] Implement rename handling and DB update on rename (`src/services/reorganizer.py`, `src/services/database.py`)
+- [ ] T010 [MVP] Implement `scan` CLI command and folder walker (`src/cli/scan.py`)
+- [ ] T011 [P] [MVP] Implement MD5 hashing utility (`src/lib/hashing.py`)
+- [ ] T012 [P] [MVP] Implement image hashing (phash) utility (`src/lib/hashing.py`)
+- [ ] T013 [MVP] Implement service to handle file scanning, metadata extraction, and database population (`src/services/scanner.py`)
+- [ ] T014a [MVP] Implement config precedence loader (CLI flag > CWD > package default) (`src/lib/config.py`)
+- [ ] T014b [MVP] Implement ExifTool path validation and executable check (`src/lib/preflight.py`)
+- [ ] T014c [MVP] Implement geodatabase reachability check with 5s timeout (`src/lib/preflight.py`)
+- [ ] T014d [MVP] Implement main database connection fallback to SQLite (`src/lib/preflight.py`)
+- [ ] T014e [MVP] Implement candidate file counter (diagnostic, non-blocking) (`src/lib/preflight.py`)
+- [ ] T014f [MVP] Wire all preflight checks into scan CLI startup (`src/cli/scan.py`)
 
 ---
 
-## Phase 5: User Story 3 - Tagging (Priority: P3)
+## Phase 4: User Story 1 - Duplicate Detection
 
-**Goal**: Add, remove, and view tags for media files.
-
-**Independent Test Criteria**: Unit and integration tests that add/remove/list tags via CLI and assert DB state and CLI output.
-
-### Test
-
-- [ ] T023 [US3] Add unit and integration tests for tag commands (`tests/unit/test_tag.py`, `tests/integration/test_tag_cli.py`)
-
-### Implementation
-
-- [ ] T024 [US3] Implement `tag` CLI command and subcommands `add`, `remove`, `list` (`src/cli/tag.py`)
-- [ ] T025 [P] [US3] Implement Tag model and `FileTag` join table and service helpers (`src/models/tag.py`, `src/services/tag_service.py`)
+- [ ] T015 [US1] Implement duplicate detection service (`src/services/duplicates.py`)
+- [ ] T016 [US1] Implement `duplicates` CLI command (`src/cli/duplicates.py`)
 
 ---
 
-## Phase 6: User Story 4 - File Renaming (Priority: P4)
+## Phase 5: User Story 2 - File Reorganization
 
-**Goal**: Rename media files according to config-defined templates and handle conflicts safely.
-
-**Independent Test Criteria**: Integration test that runs `reorganize --rename` and verifies names, DB updates, and unique suffix behavior on conflict.
-
-- [ ] T026 [US4] Add integration test for rename behavior (`tests/integration/test_rename.py`)
-- [ ] T027 [US4] Implement rename template parser and available tokens (`src/lib/rename.py`)
-- [ ] T028 [US4] Implement conflict resolution and unique suffix strategy (`src/services/reorganizer.py`)
-- [ ] T029 [US4] Ensure DB `original_name` and `name` are updated atomically on rename (`src/services/database.py`)
+- [ ] T017 [US2] Implement `reorganize` CLI command (`src/cli/reorganize.py`)
+- [ ] T018 [US2] Implement reorganization service (`src/services/reorganizer.py`)
+- [ ] T018a [US2] Implement database path/name update during reorganization (update existing record, not insert) (`src/services/reorganizer.py`)
 
 ---
 
-## Phase 7: User Story 5 - Related ID Management (Priority: P5)
+## Phase 6: User Story 3 - Tagging
 
-**Goal**: Assign and manage `related_id` to group related media files.
-
-**Independent Test Criteria**: Unit tests for related-id assignment rules and CLI tests for group assignment and update-latest behavior.
-
-- [ ] T030 [US5] Add unit tests for `related_id` auto-increment and assignment (`tests/unit/test_related_id.py`)
-- [ ] T031 [US5] Implement `related-id` CLI command and subcommands (`src/cli/related_id.py`)
-- [ ] T032 [US5] Implement DB routines for auto-incrementing `related_id` and MD5-based assignment (`src/services/database.py`)
-- [ ] T033 [US5] Implement `--update-latest` behavior and CLI handler (`src/cli/related_id.py`)
+- [ ] T019 [US3] Implement tag data model and repository methods (`src/models/tag.py`, `src/services/repository.py`)
+- [ ] T020 [US3] Implement `tag add` CLI command (`src/cli/tag.py`)
+- [ ] T021 [US3] Implement `tag remove` CLI command (`src/cli/tag.py`)
+- [ ] T022 [US3] Implement `tag list` CLI command (`src/cli/tag.py`)
+- [ ] T023 [US3] Create integration tests for tag CRUD operations (`tests/integration/test_tags.py`)
 
 ---
 
-## Phase 8: Cross-cutting & Polish
+## Phase 7: Data Export
 
-- [ ] T034 [P] Create export functionality (CSV/JSON) and CLI hooks (`src/services/exporter.py`, `src/cli/export.py`)
-- [ ] T035 Add `rescan` behavior implementation and `--rescan` handling for `scan` (`src/cli/scan.py`, `src/services/duplicate_detector.py`)
-- [ ] T036 Implement `is_deleted` detection and CLI to mark entries as deleted and garbage-collect (`src/services/deletion.py`, `src/cli/admin.py`)
-- [ ] T037 Ensure DB timestamps `created_at` and `updated_at` are set and updated by ORM (`src/models/file.py`, migrations)
-- [ ] T038 [P] Add profiling harness and measurable performance tests for SC-001 (`tests/perf/test_perf_baseline.py`, `tools/profiler/`)
-- [ ] T039 [P] Implement security checks for file operations (validate paths, avoid race conditions) (`src/lib/safe_ops.py`)
-- [ ] T040 [P] Documentation: update `README.md`, `quickstart.md`, and `docs/` (`README.md`, `specs/001-media-organizer-cli/quickstart.md`)
-- [ ] T041 Code cleanup, type hints, and lint fixes across `src/` (`src/`)
-- [ ] T042 Add CI job to run unit and integration tests (`.github/workflows/ci.yml`)
-- [ ] T043 Run `quickstart.md` validation (verify sample commands work with new CLI) (`specs/001-media-organizer-cli/quickstart.md`)
+- [ ] T024 Implement export service with CSV and JSON formatters (`src/services/exporter.py`)
+- [ ] T025 Implement `export duplicates` CLI command (`src/cli/export.py`)
+- [ ] T026 Implement `export tags` CLI command (`src/cli/export.py`)
+- [ ] T027 Create integration tests for export functionality (`tests/integration/test_export.py`)
 
 ---
 
-## Dependencies (high-level user story completion order)
+## Phase 8: User Story 5 - Related ID Management
 
-1. Phase 1 (T001-T004) must be complete before foundational work.
-2. Phase 2 (T005-T009) must be complete before Story implementations.
-3. Story phases executed in priority order: US1 (T010-T016) → US2 (T017-T022) → US3 (T023-T025) → US4 (T026-T029) → US5 (T030-T033).
-4. Cross-cutting tasks (T034-T043) can run in parallel where marked [P].
+- [ ] T028 [US5] Implement related_id auto-increment logic in repository layer (`src/services/repository.py`)
+- [ ] T029 [US5] Implement `related-id set` CLI command (`src/cli/related_id.py`)
+- [ ] T030 [US5] Implement `related-id update-latest` CLI command (`src/cli/related_id.py`)
+- [ ] T031 [US5] Implement MD5-based related_id inheritance on duplicate insert (`src/services/scanner.py`)
+- [ ] T032 [US5] Create integration tests for related_id operations (`tests/integration/test_related_id.py`)
 
-## Parallel execution examples
+---
 
-- Example A (parallel workers): T012 (MD5 hashing) and T013 (image hashing) can run in parallel across file batches — mark both [P].
-- Example B (CI & docs): T042 (CI) and T040 (docs) can be worked on in parallel by different contributors — both [P].
-- Example C (foundational parallel): T006 (DB abstraction) and T007 (ExifTool wrapper) are parallelizable implementation tasks — both [P].
+## Phase 9: User Story 7 - Rescan and Update
 
-## Implementation strategy (MVP-first, incremental)
+- [ ] T033 [US7] Implement file change detection service (MD5 comparison) (`src/services/change_detector.py`)
+- [ ] T034 [US7] Implement version linking logic (previous_version_id) (`src/services/repository.py`)
+- [ ] T035 [US7] Implement `update` CLI command with directory rescan (`src/cli/update.py`)
+- [ ] T036 [US7] Create integration tests for rescan scenarios (edit/move/rename) (`tests/integration/test_update.py`)
 
-- MVP scope suggestion: Deliver **User Story 1 (Duplicate Detection)** end-to-end (T010–T016) plus foundational DB/config (T005, T006, T009) and one integration test (T010). This provides a usable CLI `scan` + `duplicates` and is testable.
-- Iteration 2: Add reorganization (US2 T017–T022) and tagging (US3 T023–T025).
-- Iteration 3: Renaming and related-id features (US4, US5), polish and performance optimizations.
+---
 
-## Task counts & mapping
+## Phase 10: User Story 4 - File Renaming
 
-- Total tasks: 43 (T001–T043)
-- Tasks by story:
-	- US1: 7 tasks (T010–T016)
-	- US2: 6 tasks (T017–T022)
-	- US3: 3 tasks (T023–T025)
-	- US4: 4 tasks (T026–T029)
-	- US5: 4 tasks (T030–T033)
-	- Setup/Foundational/Cross-cutting: 19 tasks (T001–T009, T034–T043)
+- [ ] T037 [US4] Implement rename format parser with placeholders (MD5, YYYY, PHASH, etc.) (`src/lib/renaming.py`)
+- [ ] T038 [US4] Implement collision detection and unique suffix generation (`src/lib/renaming.py`)
+- [ ] T039 [US4] Integrate rename logic into reorganize service (`src/services/reorganizer.py`)
+- [ ] T040 [US4] Create integration tests for renaming with conflicts (`tests/integration/test_rename.py`)
 
-## Format validation
+---
 
-- All tasks begin with a checklist (`- [ ]`), include a TaskID `T###`, story label `[USn]` for story tasks, `[P]` only where parallelizable, and end with a file or path reference.
+## Phase 11: User Story 6 - Post-Scan GPS Updates
 
-## Notes
+- [ ] T041 [US6] Implement GPS update service with geocoding (`src/services/gps_updater.py`)
+- [ ] T042 [US6] Implement `gps update` CLI command (`src/cli/gps.py`)
+- [ ] T043 [US6] Add geocode_provenance tracking (manual vs geonames) (`src/services/gps_updater.py`)
+- [ ] T044 [US6] Create integration tests for GPS update scenarios (`tests/integration/test_gps_update.py`)
 
-- I added automated test tasks because the feature spec includes mandatory testing scenarios and to align with best practices. If you prefer manual-only tests, I can remove or reclassify test tasks.
+---
 
-```
+## Phase 12: Auto-Clustering by GPS and Time
+
+- [ ] T045 Implement GPS proximity calculator (haversine distance) (`src/lib/geo.py`)
+- [ ] T046 Implement time threshold clustering service (`src/services/clustering.py`)
+- [ ] T047 Add `related_time_threshold_minutes` to config validation (`src/lib/config.py`)
+- [ ] T048 Integrate auto-clustering into scan workflow (optional flag) (`src/services/scanner.py`)
+- [ ] T049 Create integration tests for GPS/time clustering (`tests/integration/test_clustering.py`)
+
+---
+
+## Implementation Strategy (MVP-first, incremental)
+
+- **MVP scope**: Deliver the **Initial Scan** functionality end-to-end (T009–T014) plus foundational DB/config (T004-T008). This provides a usable CLI `scan` command that populates the database.
+- **Iteration 2**: Add duplicate detection (US1).
+- **Iteration 3**: Add file reorganization (US2) and other features.
