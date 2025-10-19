@@ -111,6 +111,88 @@ def init_db(engine):
 
     Base.metadata.create_all(engine)
 
+    # After creating missing tables, attempt to add missing columns on existing tables.
+    # This is a best-effort, lightweight schema update: for each column declared
+    # in the models but missing in the DB, run a simple ALTER TABLE ADD COLUMN
+    # statement using a conservative SQL type mapping. This helps add new model
+    # fields (e.g., `country`, `city`) without requiring manual Alembic migrations.
+    try:
+        _apply_missing_columns(engine, Base)
+    except Exception:
+        # Don't let schema auto-update prevent app startup; fail safely and let
+        # a human-run migration handle complex cases.
+        pass
+
+
+def _apply_missing_columns(engine, base_metadata):
+    """Detect model-declared columns missing in the database and add them.
+
+    This function uses a conservative mapping of SQLAlchemy column types to
+    SQL literal types appropriate for MySQL and SQLite. It intentionally
+    skips primary-key columns and complex constraints. Use this for simple
+    additive schema changes only.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+
+    # Helper: map simple SQLAlchemy column types to SQL type strings
+    def _sql_type_for(col):
+        t = col.type
+        # String(length)
+        if hasattr(t, "length") and getattr(t, "length"):
+            return f"VARCHAR({t.length})"
+        typename = type(t).__name__.lower()
+        if "text" in typename:
+            return "TEXT"
+        if "integer" in typename or "int" in typename:
+            return "INTEGER"
+        if "float" in typename or "numeric" in typename or "decimal" in typename:
+            return "FLOAT"
+        if "boolean" in typename:
+            # MySQL: BOOLEAN is an alias for TINYINT(1)
+            return "BOOLEAN"
+        if "datetime" in typename or "timestamp" in typename:
+            return "DATETIME"
+        # Fallback to TEXT
+        return "TEXT"
+
+    for table in base_metadata.metadata.sorted_tables:
+        tbl_name = table.name
+        try:
+            existing = {c['name'] for c in inspector.get_columns(tbl_name)}
+        except Exception:
+            # Table doesn't exist or inspector cannot read it; skip
+            continue
+
+        for col in table.columns:
+            if col.name in existing:
+                continue
+            # Skip primary keys or server-managed columns
+            if col.primary_key:
+                continue
+
+            sql_type = _sql_type_for(col)
+            nullable = "NULL" if col.nullable else "NOT NULL"
+            # Attempt to synthesize a sensible default clause when server_default exists
+            default_clause = ""
+            try:
+                if col.server_default is not None:
+                    # Do not try to evaluate SQL expressions; leave default empty
+                    default_clause = ""
+            except Exception:
+                default_clause = ""
+
+            alter_sql = f"ALTER TABLE {tbl_name} ADD COLUMN {col.name} {sql_type} {nullable} {default_clause}".strip()
+            # Execute the ALTER TABLE statement
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text(alter_sql))
+            except Exception:
+                # If this simple ALTER fails (types/constraints mismatch), skip it
+                # and allow developer to apply a manual Alembic migration.
+                continue
+
 
 class InMemoryAdapter:
     """Lightweight in-memory DB adapter for tests.
