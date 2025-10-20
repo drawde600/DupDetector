@@ -4,20 +4,31 @@ from typing import Optional, Iterable, Set, Any
 import json
 import concurrent.futures
 import traceback
+import time
 
 from dupdetector.lib.hashing import md5_file, phash_stub
+from dupdetector.lib.filetype import detect_media_type
 from dupdetector.services.repository import Repository
 
 
 def _iter_files(folder: Path, recursive: bool) -> Iterable[Path]:
+    """Iterate over files in folder. Yields only valid files, skipping directories and errors."""
     if recursive:
         for p in folder.rglob("*"):
-            if p.is_file():
-                yield p
+            try:
+                if p.is_file():
+                    yield p
+            except (OSError, PermissionError):
+                # Skip files we can't access
+                continue
     else:
         for p in folder.iterdir():
-            if p.is_file():
-                yield p
+            try:
+                if p.is_file():
+                    yield p
+            except (OSError, PermissionError):
+                # Skip files we can't access
+                continue
 
 
 def _exts_from_arg(exts_arg: Optional[str]) -> Optional[Set[str]]:
@@ -33,41 +44,41 @@ def _exts_from_arg(exts_arg: Optional[str]) -> Optional[Set[str]]:
 
 
 
-def _load_config(path: str) -> dict[str, Any]:
+def _load_config(path: str, verbose: bool = True) -> dict[str, Any]:
     p = Path(path)
-    # Provide clear visibility for which config paths are being consulted and
-    # the exact contents (line-by-line) read from the file.
+    # Load and parse config file with optional verbose output
     try:
         if not p.exists():
-            print(f"_load_config: path does not exist: {p}")
+            if verbose:
+                print(f"_load_config: path does not exist: {p}")
             return {}
-        print(f"_load_config: attempting to load config from: {p}")
-        # Read file as text and print lines with numbers for full visibility
+        if verbose:
+            print(f"Loading config from: {p}")
+        # Read file as text
         try:
             with p.open("r", encoding="utf-8") as fh:
                 lines = fh.read().splitlines()
         except Exception as e:
-            print(f"_load_config: failed to read file lines from {p}: {e}")
-            traceback.print_exc()
+            if verbose:
+                print(f"ERROR: failed to read config file {p}: {e}")
+                traceback.print_exc()
             return {}
 
-        print(f"_load_config: file {p} contents ({len(lines)} lines):")
-        for i, ln in enumerate(lines, start=1):
-            # print with line numbers to help debugging of config parsing issues
-            print(f"{p}:{i}: {ln}")
-
-        # Now parse JSON
+        # Parse JSON
         try:
             data = json.loads("\n".join(lines))
-            print(f"_load_config: parsed JSON config from: {p}")
+            if verbose:
+                print(f"Config loaded successfully ({len(lines)} lines)")
             return data
         except Exception as e:
-            print(f"_load_config: failed to parse JSON from {p}: {e}")
-            traceback.print_exc()
+            if verbose:
+                print(f"ERROR: failed to parse JSON from {p}: {e}")
+                traceback.print_exc()
             return {}
     except Exception as e:
-        print(f"_load_config: unexpected error when loading {p}: {e}")
-        traceback.print_exc()
+        if verbose:
+            print(f"ERROR: unexpected error when loading {p}: {e}")
+            traceback.print_exc()
         return {}
 
 
@@ -106,7 +117,8 @@ def scan(args, session: Optional[object] = None):
     else:
         candidate = folder / "config.json"
         cfg_path = str(candidate) if candidate.exists() else None
-    raw_cfg = _load_config(cfg_path) if cfg_path else {}
+    # Use verbose=False to avoid redundant config output if already loaded by caller
+    raw_cfg = _load_config(cfg_path, verbose=False) if cfg_path else {}
     cfg = _validate_and_normalize_config(raw_cfg)
 
     # Lightweight validation: warn if geocoding is enabled but local_geonames creds incomplete
@@ -131,8 +143,12 @@ def scan(args, session: Optional[object] = None):
         exts = _exts_from_arg(exts_arg)
     else:
         exts = { ("." + e) for e in cfg.get("extensions") } if cfg.get("extensions") else None
-    min_size = getattr(args, "min_size", None) if getattr(args, "min_size", None) is not None else cfg.get("min_size")
-    max_size = getattr(args, "max_size", None) if getattr(args, "max_size", None) is not None else cfg.get("max_size")
+
+    # Convert min/max size to int once before loop to avoid repeated conversions and None checks
+    min_size_raw = getattr(args, "min_size", None) if getattr(args, "min_size", None) is not None else cfg.get("min_size")
+    max_size_raw = getattr(args, "max_size", None) if getattr(args, "max_size", None) is not None else cfg.get("max_size")
+    min_size = int(min_size_raw) if min_size_raw is not None else None
+    max_size = int(max_size_raw) if max_size_raw is not None else None
 
     print(f"Scanning folder: {folder} (config={cfg_path}) recursive={recursive} extensions={exts} min_size={min_size} max_size={max_size}")
 
@@ -172,26 +188,54 @@ def scan(args, session: Optional[object] = None):
     # Build candidate list first so we can report total and progress (memory: holds Path objects)
     candidates = []
     limit = getattr(args, "limit", None)
-    for p in sorted(_iter_files(folder, recursive)):
+
+    # Use optimized filtering logic based on which filters are configured
+    # to avoid redundant None checks in the hot loop
+    has_ext_filter = exts is not None
+    has_min_size = min_size is not None
+    has_max_size = max_size is not None
+
+    # Measure time spent discovering and filtering files
+    start_time = time.time()
+    print(f"Discovering files in {folder}...")
+
+    # Track progress for user visibility
+    files_scanned = 0
+    last_progress_time = start_time
+    progress_interval = 2.0  # Report progress every 2 seconds
+
+    # Remove sorting to avoid collecting all files in memory first - process as we discover them
+    for p in _iter_files(folder, recursive):
+        files_scanned += 1
+
+        # Show progress every N seconds during discovery
+        current_time = time.time()
+        if current_time - last_progress_time >= progress_interval:
+            elapsed = current_time - start_time
+            print(f"  Scanned {files_scanned:,} files, found {len(candidates):,} candidates ({elapsed:.1f}s elapsed)...")
+            last_progress_time = current_time
+
         # extension filter (strict: if exts provided we only consider those)
-        if exts is not None and p.suffix.lower() not in exts:
+        if has_ext_filter and p.suffix.lower() not in exts:
             continue
         try:
             size = p.stat().st_size
         except Exception as exc:
             print(f"skipping {p}: cannot stat file: {exc}")
             continue
-        if min_size is not None and size < int(min_size):
+        # Only check size constraints if they are configured
+        if has_min_size and size < min_size:
             continue
-        if max_size is not None and size > int(max_size):
+        if has_max_size and size > max_size:
             continue
         candidates.append((p, size))
         # Apply limit if specified
         if limit and len(candidates) >= limit:
             break
 
+    discovery_time = time.time() - start_time
     total = len(candidates)
-    print(f"Found {total} candidate files to process{' (limit reached)' if limit and len(candidates) >= limit else ''}")
+    print(f"Discovery complete: found {total:,} candidate files (scanned {files_scanned:,} total files in {discovery_time:.2f}s)")
 
     # Worker pool size (tests may not set this arg)
     workers = getattr(args, "workers", None) or 4
@@ -202,12 +246,17 @@ def scan(args, session: Optional[object] = None):
         try:
             md5 = md5_file(path_str)
         except Exception as exc:
-            return {"path": path_str, "size": size, "md5": None, "phash": None, "error": str(exc)}
+            return {"path": path_str, "size": size, "md5": None, "phash": None, "media_type": None, "error": str(exc)}
         try:
             ph = phash_stub(path_str)
         except Exception:
             ph = None
-        return {"path": path_str, "size": size, "md5": md5, "phash": ph, "error": None}
+        # Detect actual file type using magic bytes
+        try:
+            media_type = detect_media_type(path_str)
+        except Exception:
+            media_type = None
+        return {"path": path_str, "size": size, "md5": md5, "phash": ph, "media_type": media_type, "error": None}
 
     # Submit hashing work to workers; collect results and write to DB in main thread
     results = []
@@ -221,11 +270,24 @@ def scan(args, session: Optional[object] = None):
                 size = res.get("size")
                 md5 = res.get("md5")
                 ph = res.get("phash")
+                media_type = res.get("media_type")
                 err = res.get("error")
+
+                # Check if we have folder progress info
+                folder_idx = getattr(args, "folder_idx", None)
+                total_folders = getattr(args, "total_folders", None)
+
                 if err:
-                    print(f"{i} / {total}: skipping {path}: {err}")
+                    if folder_idx and total_folders:
+                        print(f"{folder_idx} / {total_folders}: {i} / {total}: skipping {path}: {err}")
+                    else:
+                        print(f"{i} / {total}: skipping {path}: {err}")
                     continue
-                print(f"{i} / {total}: found file: {path} size={size} md5={md5} phash={ph}")
+
+                if folder_idx and total_folders:
+                    print(f"{folder_idx} / {total_folders}: {i} / {total}: found file: {path} size={size} md5={md5} phash={ph} type={media_type}")
+                else:
+                    print(f"{i} / {total}: found file: {path} size={size} md5={md5} phash={ph} type={media_type}")
                 if repo:
                     try:
                         # If exiftool_path is configured, run it first and capture raw EXIF
@@ -251,8 +313,12 @@ def scan(args, session: Optional[object] = None):
                             size=size,
                             md5_hash=md5,
                             photo_hash=ph,
+                            media_type=media_type,
                             raw_exif=raw_out,
                         )
+                        # Persist raw EXIF to exif_data table
+                        if raw_out:
+                            repo.save_exif(created.id, raw_out)
                     except Exception as exc:
                         # Per user policy, abort the entire scan if any file
                         # with GPS cannot be reverse-geocoded to a city/country.
@@ -288,6 +354,15 @@ def duplicates(args):
     return 0
 
 
+def deduplicate(args):
+    """Move duplicate files to a designated folder (wrapper for deduplicate.py script)."""
+    print("Please use the standalone script for deduplication:")
+    print("  python scripts/deduplicate.py --config config.json [--dry-run] [--folders ...]")
+    print("\nFor help:")
+    print("  python scripts/deduplicate.py --help")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="dupdetector")
     sub = parser.add_subparsers(dest="cmd")
@@ -306,6 +381,9 @@ def main(argv=None):
 
     p_dup = sub.add_parser("duplicates")
     p_dup.set_defaults(func=duplicates)
+
+    p_dedup = sub.add_parser("deduplicate", help="Move duplicate files to designated folder (see scripts/deduplicate.py)")
+    p_dedup.set_defaults(func=deduplicate)
 
     args = parser.parse_args(argv)
     if hasattr(args, "func"):

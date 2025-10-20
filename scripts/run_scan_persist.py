@@ -13,6 +13,7 @@ import argparse
 from pathlib import Path
 
 from dupdetector.lib.database import get_engine, get_sessionmaker, init_db
+from dupdetector.lib.db_lock import acquire_lock, LockAcquisitionError
 from dupdetector.cli import scan
 from dupdetector.services.repository import Repository
 import time
@@ -29,14 +30,21 @@ def main() -> int:
     parser.add_argument("--max-size", type=int)
     parser.add_argument("--limit", type=int, help="Limit the number of files to process")
     parser.add_argument("--workers", type=int, help="Number of worker threads to use for hashing (passed to scan)")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose config loading output")
     args = parser.parse_args()
 
     # --- Startup preflight: load effective config and validate runtime deps ---
-    try:
-        from dupdetector.cli import _load_config
+    preflight_start = time.time()
+    print(f"\n{'='*80}")
+    print(f"Starting preflight checks at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"{'='*80}\n")
 
-        # Determine which config path to use (CLI override > CWD > package)
-        cfg_path = None
+    # Load config ONCE and reuse it throughout to avoid redundant file I/O
+    from dupdetector.cli import _load_config
+
+    # Determine which config path to use (CLI override > CWD > package)
+    cfg_path = None
+    try:
         if args.config:
             cfg_path = Path(args.config)
         else:
@@ -48,9 +56,11 @@ def main() -> int:
                 if pkg_cfg.exists():
                     cfg_path = pkg_cfg
 
-        effective_cfg = _load_config(str(cfg_path)) if cfg_path else {}
+        # Use verbose flag from command line (default: quiet)
+        effective_cfg = _load_config(str(cfg_path), verbose=args.verbose) if cfg_path else {}
     except Exception:
         effective_cfg = {}
+        cfg_path = None
 
     # ExifTool required if configured
     try:
@@ -130,75 +140,26 @@ def main() -> int:
         print("FATAL: error during geodatabase preflight; aborting.")
         raise SystemExit(4)
 
-    # Quick candidate count (diagnostic): determine folder and options from effective config
-    try:
-        folder_to_check = Path(args.folder) if args.folder and args.folder != "." else None
-        if not folder_to_check and isinstance(effective_cfg, dict):
-            mf = effective_cfg.get("media_folders")
-            if isinstance(mf, list) and mf:
-                folder_to_check = Path(mf[0])
-        if not folder_to_check:
-            folder_to_check = Path(args.folder or ".")
+    # Preflight candidate count removed - the main scan() function already reports
+    # the file count after discovery, making this redundant and wasteful
 
-        exts = None
-        if isinstance(effective_cfg, dict) and effective_cfg.get("extensions"):
-            exts = {"." + e.lower().lstrip(".") for e in effective_cfg.get("extensions")}
-        recursive_check = bool(effective_cfg.get("recursive", False)) if isinstance(effective_cfg, dict) else False
-        min_size = int(effective_cfg.get("min_size")) if isinstance(effective_cfg, dict) and effective_cfg.get("min_size") is not None else None
-        max_size = int(effective_cfg.get("max_size")) if isinstance(effective_cfg, dict) and effective_cfg.get("max_size") is not None else None
-
-        cand_count = 0
-        if folder_to_check.exists():
-            if recursive_check:
-                iterator = folder_to_check.rglob("*")
-            else:
-                iterator = folder_to_check.iterdir()
-            for p in iterator:
-                try:
-                    if not p.is_file():
-                        continue
-                    if exts and p.suffix.lower() not in exts:
-                        continue
-                    size = p.stat().st_size
-                    if min_size is not None and size < min_size:
-                        continue
-                    if max_size is not None and size > max_size:
-                        continue
-                    cand_count += 1
-                except Exception:
-                    continue
-        print(f"Preflight: candidate files in '{folder_to_check}': {cand_count}")
-    except Exception:
-        # non-fatal
-        pass
+    preflight_time = time.time() - preflight_start
+    print(f"\n{'='*80}")
+    print(f"Preflight checks completed in {preflight_time:.2f}s")
+    print(f"{'='*80}\n")
 
     # determine DB URL: CLI flag overrides config.json.
-    # Prefer config.json in the current working directory, then the package config.
+    # Reuse the already-loaded effective_cfg to avoid redundant file I/O
     db_url = args.db
     cfg_used_for_db = None
     if not db_url:
         try:
-            import json
-
-            # If the user passed --config, prefer that path for DB selection.
-            # Use the package CLI helper `_load_config` so we get detailed
-            # per-line prints for every config file the script reads.
-            from dupdetector.cli import _load_config
-
-            if args.config:
-                cfg_path = Path(args.config)
-            else:
-                # prefer CWD config.json, then package config
-                cfg_path = Path.cwd() / "config.json"
-                if not cfg_path.exists():
-                    cfg_path = Path(__file__).resolve().parents[1] / "config.json"
-
-            if cfg_path and cfg_path.exists():
-                cfg_used_for_db = str(cfg_path)
-                cfg = _load_config(str(cfg_path)) or {}
+            # Use the already-loaded effective_cfg instead of loading again
+            if effective_cfg and isinstance(effective_cfg, dict):
+                cfg_used_for_db = str(cfg_path) if cfg_path else None
                 # support both `database` (sqlalchemy URL or sqlite path) and
                 # legacy/Windows-style `dbConn` semicolon MySQL strings
-                db_path = cfg.get("database") or cfg.get("dbConn")
+                db_path = effective_cfg.get("database") or effective_cfg.get("dbConn")
                 if db_path:
                     # We'll let get_engine() normalize semicolon-style MySQL
                     # strings and plain paths — just pass through the raw value.
@@ -404,6 +365,18 @@ def main() -> int:
         raise
     Session = get_sessionmaker(engine)
     session = Session()
+
+    # Acquire lock to prevent concurrent scan operations
+    print("Acquiring database lock...")
+    try:
+        with acquire_lock(session, "scan", timeout_seconds=14400):  # 4 hours for long scans
+            print("Database lock acquired for scan operation")
+    except LockAcquisitionError as e:
+        print(f"ERROR: {e}")
+        print("Another scan operation may be running. Please wait and try again.")
+        session.close()
+        return 1
+
     # Note: no startup backfill. Geocoding happens inline during scan when
     # EXIF is extracted and `repo.update_file_from_exif()` is called for each
     # newly-saved EXIF. This avoids modifying historic rows at startup.
@@ -423,60 +396,75 @@ def main() -> int:
     # If the user didn't explicitly pass --recursive, forward None so scan() will use config.json
     recursive_arg = args.recursive if getattr(args, "recursive", False) else None
 
-    # If the caller didn't pass a folder (or passed the default '.'), prefer the first
-    # entry of `media_folders` from the chosen config.json when available.
-    folder_arg = args.folder
+    # If the caller didn't pass a folder (or passed the default '.'), use ALL
+    # entries from `media_folders` from the chosen config.json when available.
+    folder_args = []
     if (not args.folder) or args.folder == ".":
-        if cfg_arg:
-            try:
-                from dupdetector.cli import _load_config
-
-                cfg_json = _load_config(str(cfg_arg)) or {}
-                mf = cfg_json.get("media_folders")
+        # Reuse the already-loaded effective_cfg instead of loading again
+        try:
+            if effective_cfg and isinstance(effective_cfg, dict):
+                mf = effective_cfg.get("media_folders")
                 if isinstance(mf, list) and len(mf) > 0:
-                    folder_arg = mf[0]
-            except Exception:
-                # ignore parsing errors and fall back to args.folder
-                pass
-
-    # construct args Namespace similar to CLI and call scan with session
-    cli_args = argparse.Namespace(
-        folder=folder_arg,
-        config=cfg_arg,
-        recursive=recursive_arg,
-        extensions=args.extensions,
-        min_size=args.min_size,
-        max_size=args.max_size,
-        limit=args.limit,
-        workers=args.workers,
-    )
+                    folder_args = mf
+                else:
+                    folder_args = [args.folder]
+            else:
+                folder_args = [args.folder]
+        except Exception:
+            # ignore parsing errors and fall back to args.folder
+            folder_args = [args.folder]
+    else:
+        # User specified a folder explicitly
+        folder_args = [args.folder]
 
     repo = Repository(session)
 
     # determine effective worker count: CLI -> config -> default
+    # Reuse the already-loaded effective_cfg instead of loading again
     effective_workers = None
-    if cli_args.workers is not None:
-        effective_workers = cli_args.workers
+    if args.workers is not None:
+        effective_workers = args.workers
     else:
         try:
-                if cfg_arg:
-                    try:
-                        from dupdetector.cli import _load_config
-
-                        cfg_json = _load_config(str(cfg_arg)) or {}
-                        cfg_workers = cfg_json.get("workers")
-                        if isinstance(cfg_workers, int):
-                            effective_workers = cfg_workers
-                    except Exception:
-                        effective_workers = None
+            if effective_cfg and isinstance(effective_cfg, dict):
+                cfg_workers = effective_cfg.get("workers")
+                if isinstance(cfg_workers, int):
+                    effective_workers = cfg_workers
         except Exception:
             effective_workers = None
     if effective_workers is None:
         effective_workers = 4
 
     start = time.perf_counter()
-    # scan() will perform the persistence via the provided session/repo via repo.create_file
-    exit_code = scan(cli_args, session=session)
+
+    # Iterate through all folders
+    total_folders = len(folder_args)
+    overall_exit_code = 0
+
+    for folder_idx, folder_path in enumerate(folder_args, start=1):
+        print(f"\n{'='*80}")
+        print(f"Folder {folder_idx} / {total_folders}: {folder_path}")
+        print(f"{'='*80}\n")
+
+        # construct args Namespace similar to CLI and call scan with session
+        cli_args = argparse.Namespace(
+            folder=folder_path,
+            config=cfg_arg,
+            recursive=recursive_arg,
+            extensions=args.extensions,
+            min_size=args.min_size,
+            max_size=args.max_size,
+            limit=args.limit,
+            workers=effective_workers,
+            folder_idx=folder_idx,
+            total_folders=total_folders,
+        )
+
+        # scan() will perform the persistence via the provided session/repo via repo.create_file
+        exit_code = scan(cli_args, session=session)
+        if exit_code != 0:
+            overall_exit_code = exit_code
+
     end = time.perf_counter()
 
     # Summarize counts from DB using repository helpers
@@ -491,7 +479,10 @@ def main() -> int:
         added = None
 
     duration = end - start
-    print("\nScan summary:")
+    print(f"\n{'='*80}")
+    print("OVERALL SCAN SUMMARY")
+    print(f"{'='*80}")
+    print(f"  folders scanned: {total_folders}")
     print(f"  worker threads: {effective_workers}")
     print(f"  elapsed time: {duration:.2f} seconds")
     if total is not None:
@@ -500,7 +491,7 @@ def main() -> int:
         print(f"  added (non-duplicates): {added}")
         print(f"  duplicates: {duplicates}")
 
-    return exit_code
+    return overall_exit_code
 
 
 if __name__ == "__main__":

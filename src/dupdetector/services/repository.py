@@ -325,7 +325,7 @@ class Repository:
         try:
             (self.session.query(File)
                 .filter_by(id=new_id)
-                .update({'previous_id': previous_id}, synchronize_session=False))
+                .update({'previous_id': previous_id, 'updated_at': sa_func.current_timestamp()}, synchronize_session=False))
             self.session.commit()
         except Exception:
             self.session.rollback()
@@ -1191,11 +1191,11 @@ class Repository:
                 (self.session.query(File)
                     .filter(File.id.in_(ids))
                     .filter(File.id != canonical)
-                    .update({"related_id": canonical}, synchronize_session=False))
+                    .update({"related_id": canonical, "updated_at": sa_func.current_timestamp()}, synchronize_session=False))
                 # Ensure canonical row has related_id=None (or itself?) — keep as None to indicate canonical
                 (self.session.query(File)
                     .filter_by(id=canonical)
-                    .update({"related_id": None}, synchronize_session=False))
+                    .update({"related_id": None, "updated_at": sa_func.current_timestamp()}, synchronize_session=False))
                 self.session.commit()
         except Exception:
             # On any failure during linking, rollback but do not raise — linking is best-effort

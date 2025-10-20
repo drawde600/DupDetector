@@ -73,7 +73,7 @@ The following configuration keys must be documented in `config.json`:
 | `max_size` | Integer (bytes) | No | `null` (unlimited) | Maximum file size to scan |
 | `recursive` | Boolean | No | `true` | Scan subdirectories recursively |
 | `related_time_threshold_minutes` | Integer | No | `60` | Max time difference (minutes) for auto-clustering related files by GPS+time |
-| `rename_format` | String | No | `"{YYYY}-{MM}-{DD}_{MD5}"` | Template for file renaming (see FR-012 for placeholders) |
+| `rename_format` | String | No | `"{YYYY}{MM}{DD}_{HH}{mm}{SS}_{MD5}{NN}"` | Template for file renaming (see FR-012 for placeholders) |
 | `duplicate_folder` | String (path) | No | `./duplicates` | Destination folder for moved duplicates |
 
 ## User Scenarios & Testing *(mandatory)*
@@ -207,7 +207,7 @@ As a user, I want to be able to rescan my media library to detect changes, inclu
 - **FR-009**: The system MUST display a structured error message (including an error code and brief description) and log detailed error information to a file when an error occurs.
 - **FR-010**: The system MUST implement basic logging, recording the start and end of major operations (e.g., a scan) and any errors that occur.
 - **FR-011**: The system MUST support exporting data (e.g., a list of duplicates, tags) to common formats like CSV or JSON.
-- **FR-012**: The system MUST allow users to rename files based on a predefined format in the configuration file, supporting placeholders for metadata (e.g., MD5, YYYY, MM, DD, PHASH, related_id) and a `datatype` indicator for date sources (0 for Exif, 1 for manual, 8 for literal YYYY-MM-DD, 9 for file creation time).
+- **FR-012**: The system MUST allow users to rename files based on a predefined format in the configuration file, supporting placeholders for metadata (e.g., MD5, YYYY, MM, DD, PHASH, related_id) and a `datetype` indicator for date sources (0 for Exif, 1 for manual, 8 for literal YYYY-MM-DD, 9 for file creation time).
 - **FR-013**: The system MUST store the original filename in the database.
 - **FR-014**: The system MUST update the filename in the database when the file is renamed.
 - **FR-015**: The system MUST provide a command-line interface for CRUD operations on the `related_id` for each file.

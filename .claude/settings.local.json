@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pwsh:*)",
+      "Bash(powershell:*)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(set PYTHONPATH=src)",
+      "Bash(python -m pytest tests/test_smoke.py -v)",
+      "Bash(pip install:*)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(Select-String -Pattern \"dup1\")",
+      "Bash(Select-Object -First 5)",
+      "Bash(Remove-Item \"Z:\\tools\\duplicate-detector\\DupDetector\\scripts\\fix_duplicate_names.py\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
