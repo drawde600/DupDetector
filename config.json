@@ -1,11 +1,24 @@
 {
-  "database": "mysql+pymysql://user:password@localhost:3306/dupdetector",
+  "database": "mysql+pymysql://root:Gelawan23%23@localhost:3306/photodb2025v1",
+  "geodatabase": "mysql+pymysql://root:Gelawan23%23@localhost:3306/geonames",
   "media_folders": [
-    "Z:\\MacMini\\20251007"
+    "Z:\\MacMini\\all20251016"
+  ],
+  "media_folders_pend": [
+    "Z:\\MacMini\\20251007",
+    "Z:\\MacMini\\20251007b",
+    "Z:\\MacMini\\20251010",
+    "Z:\\MacMini\\20251010b",
+    "Z:\\MacMini\\20251017"
   ],
   "workers": 16,
   "recursive": true,
   "extensions": ["jpg", "jpeg", "png", "bmp", "dng", "cr2", "cr3", "gif", "heic", "mp4", "mov", "mkv", "mpg", "mpeg", "avi"],
-  "min_size": 0,
-  "max_size": 104857600
+  "min_size": null,
+  "max_size": null,
+  "exiftool_path": "C:\\Program Files\\exiftool-12.96_64\\exiftool.exe",
+  "duplicate_folders": {
+    "Z:\\": "Z:\\MacMini\\duplicates",
+    "C:\\": "C:\\temp\\duplicates"
+  }
 }

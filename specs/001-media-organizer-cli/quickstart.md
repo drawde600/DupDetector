@@ -3,51 +3,57 @@
 ## Installation
 
 1.  Clone the repository:
-    ```bash
+    ```powershell
     git clone <repository_url>
     ```
 2.  Install the dependencies:
-    ```bash
+    ```powershell
     pip install -r requirements.txt
     ```
 
 ## Configuration
 
-1.  Create a `config.json` file with the following content:
+1.  Create a `config.json` file with the following content. Note: `geodatabase` is REQUIRED for reverse-geocoding during scans.
     ```json
     {
         "database": "media.db",
         "media_folders": [
-            "/path/to/your/media"
+            "C:\path\to\your\media"
         ],
-        "duplicate_folder": "/path/to/your/duplicates",
-        "exiftool_path": "C:\\Program Files\\exiftool-12.96_64\\exiftool.exe",
+        "duplicate_folder": "C:\path\to\your\duplicates",
+        "exiftool_path": "C:\Program Files\exiftool-12.96_64\exiftool.exe",
+        "geodatabase": "mysql+pymysql://user:pass@host:3306/geonames",
         "rename_format": "{MD5}-{related_id}-{PHASH}"
     }
     ```
+
+Important notes:
+
+- EXIF extraction is mandatory for scans. Ensure `exiftool_path` points to a working exiftool binary.
+- Reverse-geocoding uses the local GeoNames DB given by `geodatabase`. If a file's EXIF contains GPS coordinates but the geodatabase lookup cannot resolve both `city` and `country`, the scan will abort (fail-fast) to avoid inserting incomplete geo-derived data.
 
 ## Usage
 
 ### Scan for media files
 
-```bash
-python main.py scan
+```powershell
+dupdetector scan C:\path\to\your\media
 ```
 
 ### Find and move duplicates
 
-```bash
-python main.py duplicates --move-to /path/to/your/duplicates
+```powershell
+dupdetector duplicates --move-to C:\path\to\your\duplicates
 ```
 
 ### Reorganize files
 
-```bash
-python main.py reorganize /path/to/your/media /path/to/your/organized_media --by-date
+```powershell
+dupdetector reorganize C:\path\to\your\media C:\path\to\your\organized_media --by-date
 ```
 
 ### Tag a file
 
-```bash
-python main.py tag /path/to/your/media/file.jpg "vacation"
+```powershell
+dupdetector tag C:\path\to\your\media\file.jpg "vacation"
 ```

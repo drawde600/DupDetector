@@ -1,4 +1,4 @@
-# Gemini Code Assistant Context
+﻿# Gemini Code Assistant Context
 
 This document outlines the project structure, conventions, and workflows for the `DupDetector` repository. It's designed to provide an AI assistant with the necessary context to effectively understand and contribute to the project.
 
